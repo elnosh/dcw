@@ -2,8 +2,9 @@ use std::error::Error;
 
 use cashu_crab::{
     client::Client,
+    dhke,
     nuts::{
-        nut00::{Proof, Proofs},
+        nut00::{BlindedMessages, Proof, Proofs},
         nut02::KeySet,
     },
     Amount,
@@ -85,15 +86,42 @@ impl Wallet {
         }
     }
 
+    // mint new tokens from invoice paid
+    pub async fn mint_tokens(&self, pr: &String) -> Result<(), Box<dyn Error>> {
+        let invoice = match self.get_invoice(pr) {
+            Some(v) => v,
+            None => return Err("invoice not found".into()),
+        };
+
+        // construct blinded messages
+        let blinded_messages = BlindedMessages::random(invoice.amount)?;
+
+        // send them to mint to get blinded signatures
+        let mint_res = self
+            .mint_client
+            .mint(blinded_messages.clone(), &invoice.hash)
+            .await?;
+
+        // unblind the signatures to get the proofs
+        let proofs = dhke::construct_proofs(
+            mint_res.promises,
+            blinded_messages.rs,
+            blinded_messages.secrets,
+            &self.current_keyset.keys,
+        )?;
+
+        // store proofs in db
+        for proof in proofs {
+            self.save_proof(&proof)?;
+        }
+
+        Ok(())
+    }
+
     pub fn save_proof(&self, proof: &Proof) -> Result<(), Box<dyn Error>> {
         let proof_tree = self.db.open_tree("proofs")?;
         let json_proof = serde_json::to_vec(&proof)?;
-
-        match proof_tree.insert(&proof.secret, json_proof) {
-            Ok(_) => (),
-            Err(e) => return Err(e.into()),
-        };
-
+        proof_tree.insert(&proof.secret, json_proof)?;
         Ok(())
     }
 
@@ -103,36 +131,29 @@ impl Wallet {
             Err(_) => return Vec::new(),
         };
 
-        let proofs = proof_tree
+        proof_tree
             .iter()
             .map(|res| {
                 let (_, value) = res.unwrap();
                 serde_json::from_slice(&value).unwrap()
             })
-            .collect();
-
-        proofs
+            .collect()
     }
 
     fn save_invoice(&self, invoice: &Invoice) -> Result<(), Box<dyn Error>> {
-        let invoice_tree = self.db.open_tree("proofs")?;
+        let invoice_tree = self.db.open_tree("invoices")?;
         let json_invoice = serde_json::to_vec(&invoice)?;
-
-        match invoice_tree.insert(&invoice.pr, json_invoice) {
-            Ok(_) => (),
-            Err(e) => return Err(e.into()),
-        };
-
+        invoice_tree.insert(&invoice.pr, json_invoice)?;
         Ok(())
     }
 
-    fn get_invoice(&self, hash: &str) -> Option<Invoice> {
-        let invoice_tree = match self.db.open_tree("proofs") {
+    fn get_invoice(&self, pr: &String) -> Option<Invoice> {
+        let invoice_tree = match self.db.open_tree("invoices") {
             Ok(tree) => tree,
             Err(_) => return None,
         };
 
-        let invoice: Invoice = match invoice_tree.get(&hash) {
+        let invoice: Invoice = match invoice_tree.get(&pr) {
             Ok(opt) => {
                 let v = opt?;
                 match serde_json::from_slice(&v) {
