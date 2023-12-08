@@ -1,5 +1,6 @@
 use crate::wallet::Wallet;
 use clap::{Parser, Subcommand};
+use futures::executor::block_on;
 use std::process;
 
 pub mod wallet;
@@ -27,8 +28,7 @@ enum Commands {
 }
 
 fn main() {
-    // setup wallet db here
-    let wallet = Wallet::build("http://localhost:3338").unwrap_or_else(|err| {
+    let wallet = Wallet::build("http://127.0.0.1:3338").unwrap_or_else(|err| {
         eprintln!("{err}");
         process::exit(1);
     });
@@ -36,8 +36,11 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Balance => println!("{}", wallet.get_balance()),
-        Commands::Mint { amount } => println!("requesting mint for {}", amount),
+        Commands::Balance => println!("{} sats", wallet.get_balance()),
+        Commands::Mint { amount } => match block_on(wallet.request_mint(amount)) {
+            Ok(mint_res) => println!("invoice: {}", mint_res.pr),
+            Err(e) => println!("could not generate invoice: {}", e.to_string()),
+        },
         _ => {}
     }
 }
