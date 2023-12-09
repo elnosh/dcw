@@ -120,7 +120,7 @@ impl Wallet {
     }
 
     pub async fn send(&self, amount: u64) -> Result<String, Box<dyn Error>> {
-        let proofs_to_send = self.select_proofs(self.get_proofs(), amount)?;
+        let proofs_to_send = select_proofs(self.get_proofs(), amount)?;
         let proofs_total: u64 = proofs_to_send
             .iter()
             .map(|proof| proof.amount.to_sat())
@@ -137,9 +137,7 @@ impl Wallet {
         blinded_messages.rs.append(&mut change.rs);
         blinded_messages.amounts.append(&mut change.amounts);
 
-        blinded_messages
-            .blinded_messages
-            .sort_by(|a, b| b.amount.cmp(&a.amount));
+        blinded_messages = sort_blinded_messages(blinded_messages);
 
         let split_request = SplitRequest {
             proofs: proofs_to_send.clone(),
@@ -180,26 +178,6 @@ impl Wallet {
         let token = Token::new(self.mint_client.mint_url.clone(), proofs_to_send, None)
             .convert_to_string()?;
         Ok(token)
-    }
-
-    fn select_proofs(&self, proofs: Proofs, amount: u64) -> Result<Proofs, Box<dyn Error>> {
-        let total_proofs_amount = proofs.iter().map(|proof| proof.amount.to_sat()).sum();
-        if amount > total_proofs_amount {
-            return Err("insufficient funds".into());
-        }
-
-        let mut proofs_to_send: Proofs = Vec::new();
-        let mut current_total = 0;
-        for proof in proofs {
-            current_total += proof.amount.to_sat();
-            proofs_to_send.push(proof);
-
-            if current_total > amount {
-                break;
-            }
-        }
-
-        Ok(proofs_to_send)
     }
 
     pub fn save_proof(&self, proof: &Proof) -> Result<(), Box<dyn Error>> {
@@ -255,4 +233,38 @@ impl Wallet {
         };
         Some(invoice)
     }
+}
+
+fn sort_blinded_messages(mut blinded: BlindedMessages) -> BlindedMessages {
+    let mut order = blinded.clone();
+
+    order
+        .blinded_messages
+        .sort_by(|a, b| a.amount.cmp(&b.amount));
+
+    blinded.secrets = order.secrets.iter().map(|x| x.clone()).collect::<Vec<_>>();
+    blinded.rs = order.rs.iter().map(|x| x.clone()).collect::<Vec<_>>();
+    blinded.amounts = order.amounts.iter().map(|x| x.clone()).collect::<Vec<_>>();
+
+    blinded
+}
+
+fn select_proofs(proofs: Proofs, amount: u64) -> Result<Proofs, Box<dyn Error>> {
+    let total_proofs_amount = proofs.iter().map(|proof| proof.amount.to_sat()).sum();
+    if amount > total_proofs_amount {
+        return Err("insufficient funds".into());
+    }
+
+    let mut proofs_to_send: Proofs = Vec::new();
+    let mut current_total = 0;
+    for proof in proofs {
+        current_total += proof.amount.to_sat();
+        proofs_to_send.push(proof);
+
+        if current_total > amount {
+            break;
+        }
+    }
+
+    Ok(proofs_to_send)
 }
