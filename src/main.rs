@@ -58,6 +58,10 @@ fn main() {
                 }
             }
         }
+        Commands::Send { amount } => match block_on(wallet.send(amount)) {
+            Ok(token) => println!("{}", token),
+            Err(e) => println!("{}", e.to_string()),
+        },
         _ => {}
     }
 }

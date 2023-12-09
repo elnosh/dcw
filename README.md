@@ -1,1 +1,1 @@
-learning Rust and stuff
+for learning Rust and stuff
