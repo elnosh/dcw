@@ -62,6 +62,9 @@ fn main() {
             Ok(token) => println!("{}", token),
             Err(e) => println!("{}", e.to_string()),
         },
-        _ => {}
+        Commands::Receive { token } => match block_on(wallet.receive(&token)) {
+            Ok(_) => println!("token received"),
+            Err(e) => println!("{}", e.to_string()),
+        },
     }
 }

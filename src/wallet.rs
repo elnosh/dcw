@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, str::FromStr};
 
 use cashu_crab::{
     client::Client,
@@ -157,7 +157,6 @@ impl Wallet {
             &self.current_keyset.keys,
         )?;
 
-        // need to divide proofs in proofs to send and proofs to save
         let mut proofs_to_send: Proofs = Vec::new();
         for message in send.blinded_messages {
             for (i, proof) in proofs.iter().enumerate() {
@@ -178,6 +177,49 @@ impl Wallet {
         let token = Token::new(self.mint_client.mint_url.clone(), proofs_to_send, None)
             .convert_to_string()?;
         Ok(token)
+    }
+
+    pub async fn receive(&self, token: &str) -> Result<(), Box<dyn Error>> {
+        let token = Token::from_str(token)?;
+
+        let receive_amount: u64 = token
+            .token
+            .iter()
+            .map(|proofs| {
+                proofs
+                    .proofs
+                    .iter()
+                    .map(|proof| proof.amount.to_sat())
+                    .sum::<u64>()
+            })
+            .sum();
+
+        let blinded_messages = BlindedMessages::random(Amount::from_sat(receive_amount))?;
+        let proofs: Vec<Proof> = token
+            .token
+            .iter()
+            .flat_map(|mint| mint.proofs.iter())
+            .cloned()
+            .collect();
+
+        let split_request = SplitRequest {
+            proofs: proofs,
+            outputs: blinded_messages.blinded_messages,
+        };
+        let split_res = self.mint_client.split(split_request).await?;
+
+        let proofs = dhke::construct_proofs(
+            split_res.promises,
+            blinded_messages.rs,
+            blinded_messages.secrets,
+            &self.current_keyset.keys,
+        )?;
+
+        for proof in proofs {
+            self.save_proof(&proof)?;
+        }
+
+        Ok(())
     }
 
     pub fn save_proof(&self, proof: &Proof) -> Result<(), Box<dyn Error>> {
