@@ -1,5 +1,4 @@
-use std::{error::Error, str::FromStr};
-
+use crate::error::WalletError;
 use cashu_crab::{
     client::Client,
     dhke,
@@ -11,6 +10,7 @@ use cashu_crab::{
     Amount,
 };
 use futures::executor::block_on;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,10 +35,10 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    pub fn build(mint_url: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn build(mint_url: &str) -> Result<Self, WalletError> {
         let mut home_dir = match home::home_dir() {
             Some(path) => path,
-            None => return Err("unable to setup wallet".into()),
+            None => return Err(WalletError::WalletSetupErr),
         };
         home_dir.push(".cashuw");
 
@@ -63,7 +63,7 @@ impl Wallet {
             .sum()
     }
 
-    pub async fn request_mint(&self, amount: u64) -> Result<Invoice, Box<dyn Error>> {
+    pub async fn request_mint(&self, amount: u64) -> Result<Invoice, WalletError> {
         let mut url = self.mint_client.mint_url.join("mint")?;
         url.query_pairs_mut()
             .append_pair("amount", &amount.to_string());
@@ -88,10 +88,10 @@ impl Wallet {
     }
 
     // mint new tokens from invoice paid
-    pub async fn mint_tokens(&self, pr: &String) -> Result<(), Box<dyn Error>> {
+    pub async fn mint_tokens(&self, pr: &String) -> Result<(), WalletError> {
         let invoice = match self.get_invoice(pr) {
             Some(v) => v,
-            None => return Err("invoice not found".into()),
+            None => return Err(WalletError::InvoiceNotFound),
         };
 
         // construct blinded messages
@@ -119,7 +119,7 @@ impl Wallet {
         Ok(())
     }
 
-    pub async fn send(&self, amount: u64) -> Result<String, Box<dyn Error>> {
+    pub async fn send(&self, amount: u64) -> Result<String, WalletError> {
         let proofs_to_send = select_proofs(self.get_proofs(), amount)?;
         let proofs_total: u64 = proofs_to_send
             .iter()
@@ -179,7 +179,7 @@ impl Wallet {
         Ok(token)
     }
 
-    pub async fn receive(&self, token: &str) -> Result<(), Box<dyn Error>> {
+    pub async fn receive(&self, token: &str) -> Result<(), WalletError> {
         let token = Token::from_str(token)?;
 
         let receive_amount: u64 = token
@@ -222,7 +222,7 @@ impl Wallet {
         Ok(())
     }
 
-    pub fn save_proof(&self, proof: &Proof) -> Result<(), Box<dyn Error>> {
+    pub fn save_proof(&self, proof: &Proof) -> Result<(), WalletError> {
         let proof_tree = self.db.open_tree("proofs")?;
         let json_proof = serde_json::to_vec(&proof)?;
         proof_tree.insert(&proof.secret, json_proof)?;
@@ -244,13 +244,13 @@ impl Wallet {
             .collect()
     }
 
-    fn delete_proof(&self, secret: &String) -> Result<(), Box<dyn Error>> {
+    fn delete_proof(&self, secret: &String) -> Result<(), WalletError> {
         let proof_tree = self.db.open_tree("proofs")?;
         proof_tree.remove(secret)?;
         Ok(())
     }
 
-    fn save_invoice(&self, invoice: &Invoice) -> Result<(), Box<dyn Error>> {
+    fn save_invoice(&self, invoice: &Invoice) -> Result<(), WalletError> {
         let invoice_tree = self.db.open_tree("invoices")?;
         let json_invoice = serde_json::to_vec(&invoice)?;
         invoice_tree.insert(&invoice.pr, json_invoice)?;
@@ -291,10 +291,10 @@ fn sort_blinded_messages(mut blinded: BlindedMessages) -> BlindedMessages {
     blinded
 }
 
-fn select_proofs(proofs: Proofs, amount: u64) -> Result<Proofs, Box<dyn Error>> {
+fn select_proofs(proofs: Proofs, amount: u64) -> Result<Proofs, WalletError> {
     let total_proofs_amount = proofs.iter().map(|proof| proof.amount.to_sat()).sum();
     if amount > total_proofs_amount {
-        return Err("insufficient funds".into());
+        return Err(WalletError::InsufficientFunds);
     }
 
     let mut proofs_to_send: Proofs = Vec::new();

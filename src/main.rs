@@ -3,6 +3,7 @@ use clap::{Args, Parser, Subcommand};
 use futures::executor::block_on;
 use std::process;
 
+pub mod error;
 pub mod wallet;
 
 #[derive(Parser)]
